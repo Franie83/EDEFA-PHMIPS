@@ -1,19 +1,91 @@
+# ===== Python =====
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# ===== Virtual Environments =====
+.venv/
+venv/
+env/
+ENV/
+
+# ===== Environment / Secrets =====
 .env
 .env.*
 !.env.example
+
+# ===== Databases =====
 *.db
-*.sqlite3
 *.sqlite
+*.sqlite3
 instance/
 backend/instance/
+
+# ===== Uploaded Files (sensitive) =====
 backend/uploads/
 backend/backups/
+uploads/
+media/
+
+# ===== Backup Files =====
+*.bak
 *.bak_*
+*.backup
+*~
+
+# ===== Dev Patch/Fix Scripts (not part of app) =====
+patch_*.py
+fix_*.py
+add_*.py
+migrate_*.py
+revert_*.py
+rewrite_*.py
+append_*.py
+insert_*.py
+apply_*.py
+wire_*.py
+enforce_*.py
+allow_*.py
+enrich_*.py
+restore_*.py
+reset_*.py
+cleanup_*.py
+check_*.py
+convert_*.py
+inspect_*.py
+diag_*.py
+verify_*.py
+bump_*.py
+backfill_*.py
+trim_*.py
+wipe_*.py
+*cleanup_orphans*
+*bak_*
+
+# ===== Node / React =====
 node_modules/
 dist/
-build/
-.venv/
-venv/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun.lockb
+
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ===== PowerShell Test Scripts =====
+test_*.ps1
+
+*.old
