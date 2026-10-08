@@ -1,0 +1,876 @@
+import React, { useState, useEffect } from 'react';
+import {
+  DashboardStats,
+  Hazard,
+  Project,
+  Site,
+  SiteVisit,
+  Evidence,
+  Intervention,
+  ActionItem,
+  AuditLog,
+  NotificationItem,
+  ReferenceData,
+  UserRole
+} from './types/index.ts';
+import { api } from './services/api.ts';
+import { canEdit as canEditFn, canDelete as canDeleteFn } from './types/tiers.ts';
+import { LoginScreen } from './components/auth/LoginScreen.tsx';
+import { PublicReportPage } from './components/public/PublicReportPage.tsx';
+import { PublicTrackPage } from './components/public/PublicTrackPage.tsx';
+
+// Layout Components
+import { Header } from './components/common/Header.tsx';
+import { Sidebar } from './components/common/Sidebar.tsx';
+import { NotificationDrawer } from './components/common/NotificationDrawer.tsx';
+
+// Feature Views
+import { ExecutiveDashboard } from './components/dashboard/ExecutiveDashboard.tsx';
+import { HazardList } from './components/hazards/HazardList.tsx';
+import { HazardReportsTabs } from './components/hazards/HazardReportsTabs.tsx';
+import { HazardReportModal } from './components/hazards/HazardReportModal.tsx';
+import { HazardDetailModal } from './components/hazards/HazardDetailModal.tsx';
+import { ProjectList } from './components/projects/ProjectList.tsx';
+import { ProjectDetailModal } from './components/projects/ProjectDetailModal.tsx';
+import { ProjectModal } from './components/projects/ProjectModal.tsx';
+import { SiteList } from './components/sites/SiteList.tsx';
+import { FieldVisitList } from './components/field/FieldVisitList.tsx';
+import { FieldVisitForm } from './components/field/FieldVisitForm.tsx';
+import { BeforeAfterMonitoring } from './components/monitoring/BeforeAfterMonitoring.tsx';
+import { EvidenceRepository } from './components/evidence/EvidenceRepository.tsx';
+import { InterventionPlanning } from './components/interventions/InterventionPlanning.tsx';
+import { InterventionModal } from './components/interventions/InterventionModal.tsx';
+import { ActionTracking } from './components/actions/ActionTracking.tsx';
+import { GisMapModule } from './components/gis/GisMapModule.tsx';
+import { ComprehensiveReportEngine } from './components/reports/ComprehensiveReportEngine.tsx';
+import { AnalyticsModule } from './components/analytics/AnalyticsModule.tsx';
+import { AuditLogsModule } from './components/audit/AuditLogsModule.tsx';
+import { FieldOperations } from './components/field-ops/FieldOperations.tsx';
+
+// CMS (Super Admin only)
+import { CmsModule } from './components/cms/CmsModule.tsx';
+
+export default function App() {
+  // Navigation & Role State
+  const [currentView, setCurrentView] = useState<string>('dashboard');
+  const [currentRole, setCurrentRole] = useState<UserRole>('SUPER_ADMIN');
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
+  const [authenticated, setAuthenticated] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [isNotificationOpen, setIsNotificationOpen] = useState<boolean>(false);
+
+  // App Data State
+  const [loading, setLoading] = useState<boolean>(true);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [hazards, setHazards] = useState<Hazard[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [visits, setVisits] = useState<SiteVisit[]>([]);
+  const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
+  const [interventions, setInterventions] = useState<Intervention[]>([]);
+  const [actions, setActions] = useState<ActionItem[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [referenceData, setReferenceData] = useState<ReferenceData | null>(null);
+
+  // Branding (CMS-controlled; loaded once, refreshed on save)
+  const [branding, setBranding] = useState<any | null>(null);
+
+  // Active Selected Entity Modals
+  const [selectedHazard, setSelectedHazard] = useState<Hazard | null>(null);
+  const [editingHazard, setEditingHazard] = useState<Hazard | null>(null);
+  const [planInterventionFor, setPlanInterventionFor] = useState<Hazard | null>(null);
+  const [editingIntervention, setEditingIntervention] = useState<Intervention | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState<boolean>(false);
+  const [isVisitModalOpen, setIsVisitModalOpen] = useState<boolean>(false);
+  const [visitDefaultProject, setVisitDefaultProject] = useState<Project | null>(null);
+  const [mapCenter, setMapCenter] = useState<[number, number] | undefined>(undefined);
+
+  // Verification workspace preselect — id of the hazard to open in the verification queue
+  const [verificationHazardId, setVerificationHazardId] = useState<string | undefined>(undefined);
+
+  // Public route detection — bypasses auth for /public/*
+  const [publicRoute, setPublicRoute] = useState<string>(() => window.location.pathname);
+  useEffect(() => {
+    const onNav = () => setPublicRoute(window.location.pathname);
+    window.addEventListener('popstate', onNav);
+    return () => window.removeEventListener('popstate', onNav);
+  }, []);
+
+  // Branding — load on mount and whenever the CMS fires branding-updated
+  useEffect(() => {
+    const loadBranding = async () => {
+      try {
+        const b = await api.cmsBranding();
+        setBranding(b);
+      } catch {
+        // Endpoint requires SUPER_ADMIN; non-admins just get the defaults
+        setBranding(null);
+      }
+    };
+    loadBranding();
+    const handler = (e: any) => setBranding(e.detail);
+    window.addEventListener('branding-updated', handler as EventListener);
+    return () => window.removeEventListener('branding-updated', handler as EventListener);
+  }, []);
+    // Global navigation event — lets any component request a view change
+  useEffect(() => {
+    const onNavigate = (e: any) => {
+      if (e?.detail) setCurrentView(e.detail);
+    };
+    window.addEventListener('navigate-view', onNavigate as EventListener);
+    return () => window.removeEventListener('navigate-view', onNavigate as EventListener);
+  }, []);
+
+  // Load all initial state from backend
+  const loadData = async () => {
+    // Helper: run a promise, swallow role-based 403s, return null on failure
+    const safeGet = async <T,>(p: Promise<T>): Promise<T | null> => {
+      try {
+        return await p;
+      } catch (err: any) {
+        const msg = String(err?.message || err);
+        if (msg.includes('403') || msg.includes('Forbidden')) {
+          // Expected for role-restricted endpoints — return null silently
+          return null;
+        }
+        console.warn('loadData endpoint failed:', msg);
+        return null;
+      }
+    };
+
+    try {
+      const [
+        statsData,
+        hazardsData,
+        projectsData,
+        sitesData,
+        visitsData,
+        evidenceData,
+        interventionsData,
+        actionsData,
+        logsData,
+        notificationsData,
+        refData
+      ] = await Promise.all([
+        safeGet(api.getDashboardStats()),
+        safeGet(api.getHazards()),
+        safeGet(api.getProjects()),
+        safeGet(api.getSites()),
+        safeGet(api.getSiteVisits()),
+        safeGet(api.getEvidence()),
+        safeGet(api.getInterventions()),
+        safeGet(api.getActions()),
+        safeGet(api.getAuditLogs()),
+        safeGet(api.getNotifications()),
+        safeGet(api.getReferenceData())
+      ]);
+
+      if (statsData) setStats(statsData as any);
+      if (hazardsData) setHazards(hazardsData as any);
+      if (projectsData) setProjects(projectsData as any);
+      if (sitesData) setSites(sitesData as any);
+      if (visitsData) setVisits(visitsData as any);
+      if (evidenceData) setEvidenceList(evidenceData as any);
+      if (interventionsData) setInterventions(interventionsData as any);
+      if (actionsData) setActions(actionsData as any);
+      if (logsData) setAuditLogs(logsData as any);
+      if (notificationsData) setNotifications(notificationsData as any);
+      if (refData) setReferenceData(refData as any);
+    } catch (err) {
+      console.error('Failed to load application initial state:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const auth = await api.getCurrentUser();
+        if (auth.authenticated && auth.user) {
+          setCurrentUser(auth.user);
+          setCurrentRole(auth.user.role as UserRole);
+          setAuthenticated(true);
+          await loadData();
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('Authentication bootstrap failed:', err);
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleLogin = async (u: any) => {
+    setCurrentUser(u);
+    setCurrentRole(u.role as UserRole);
+    setAuthenticated(true);
+
+    // PUBLIC_USER → send straight to the public report page
+    if (u.role === 'PUBLIC_USER') {
+      window.history.pushState({}, '', '/public/report');
+      setPublicRoute('/public/report');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    // Reset any public route when logging in
+    if (window.location.pathname.startsWith('/public/')) {
+      window.history.pushState({}, '', '/');
+      setPublicRoute('/');
+    }
+    await loadData();
+  };
+
+  const handlePublicSignOut = async () => {
+    try { await api.logout(); } catch {}
+    setAuthenticated(false);
+    setCurrentUser(null);
+    setCurrentRole('SUPER_ADMIN');
+    window.history.pushState({}, '', '/');
+    setPublicRoute('/');
+  };
+
+  // Map view navigator helper
+  const navigateToMapCoordinate = (lat: number, lng: number) => {
+    setMapCenter([lat, lng]);
+    setCurrentView('map');
+  };
+
+  // Hazard Handlers
+  const handleCreateHazard = async (formData: Partial<Hazard>) => {
+    const newHazard = await api.createHazard(formData);
+    setHazards(prev => [newHazard, ...prev]);
+    await loadData();
+    setIsReportModalOpen(false);
+  };
+
+  const handleRejectProject = async (project: Project) => {
+    const reason = window.prompt(
+      'Rejection reason (required — the Director will see this):',
+      ''
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      alert('A rejection reason is required.');
+      return;
+    }
+    try {
+      await api.rejectProject(project.id, reason);
+      await loadData();
+      setSelectedProject(null);
+    } catch (err: any) {
+      alert(`Project rejection failed: ${err.message}`);
+    }
+  };
+
+  const handleApproveProject = async (project: Project) => {
+    const notes = window.prompt('Approval notes (optional):', 'Approved.');
+    if (notes === null) return;
+    const amountStr = window.prompt(
+      'Approved amount (NGN, optional — press Cancel to use the registered amount):',
+      String(project.approved_amount_ngn || '')
+    );
+    const amount = amountStr ? parseFloat(amountStr) : undefined;
+    try {
+      await api.executiveApproveProject(project.id, notes, amount);
+      await loadData();
+      setSelectedProject(null);
+    } catch (err: any) {
+      alert(`Project approval failed: ${err.message}`);
+    }
+  };
+
+  const handleEditHazard = async (id: string, data: Partial<Hazard>) => {
+    await api.updateHazard(id, data);
+    await loadData();
+    setEditingHazard(null);
+    setSelectedHazard(null);
+  };
+
+  const handleDeleteHazard = async (hazard: Hazard) => {
+    try {
+      await api.deleteHazard(hazard.id);
+      await loadData();
+      setSelectedHazard(null);
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleVerifyHazard = async (
+    hazardId: string,
+    isValid: boolean,
+    notes: string,
+    requestInspection: boolean
+  ) => {
+    const res = await api.verifyHazard(hazardId, {
+      is_valid: isValid,
+      verification_notes: notes,
+      request_inspection: requestInspection
+    });
+    setHazards(prev => prev.map(h => (h.id === res.hazard.id ? res.hazard : h)));
+    if (selectedHazard?.id === res.hazard.id) {
+      setSelectedHazard(res.hazard);
+    }
+    await loadData();
+  };
+
+  const handleAssessHazard = async (hazardId: string, assessmentData: any) => {
+    const res = await api.assessHazard(hazardId, assessmentData);
+    setHazards(prev => prev.map(h => (h.id === res.hazard.id ? res.hazard : h)));
+    if (selectedHazard?.id === res.hazard.id) {
+      setSelectedHazard(res.hazard);
+    }
+    await loadData();
+  };
+
+  const handleRecommendIntervention = async (hazardId: string, interventionData: any) => {
+    const res = await api.recommendIntervention(hazardId, interventionData);
+    setHazards(prev => prev.map(h => (h.id === res.hazard.id ? res.hazard : h)));
+    if (res.intervention) {
+      setInterventions(prev => [res.intervention, ...prev]);
+    }
+    await loadData();
+  };
+
+  const handleDeleteIntervention = async (iv: Intervention) => {
+    try {
+      await api.deleteIntervention(iv.id);
+      await loadData();
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Project Handlers
+  const handleCreateProject = async (formData: Partial<Project>) => {
+    const newProject = await api.createProject(formData);
+    setProjects(prev => [newProject, ...prev]);
+    await loadData();
+    setIsProjectModalOpen(false);
+  };
+
+  const handleUpdateProject = async (id: string, data: Partial<Project>) => {
+    await api.updateProject(id, data);
+    await loadData();
+    setEditingProject(null);
+  };
+
+  const handleDeleteProject = async (project: Project) => {
+    try {
+      await api.deleteProject(project.id);
+      await loadData();
+      setSelectedProject(null);
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Field Visit Handlers
+  const handleLogVisit = async (visitData: any) => {
+    await api.createSiteVisit(visitData);
+    await loadData();
+    setIsVisitModalOpen(false);
+  };
+
+  const handleCreateSite = async (siteData: Partial<Site>) => {
+    const newSite = await api.createSite(siteData);
+    setSites(prev => [newSite, ...prev]);
+    await loadData();
+  };
+
+  const handleDeleteSite = async (site: Site) => {
+    try {
+      await api.deleteSite(site.id);
+      await loadData();
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleEditSite = (site: Site) => {
+    const name = window.prompt('Site name:', site.name);
+    if (name === null) return;
+    const community = window.prompt('Community:', site.community);
+    if (community === null) return;
+    const baseline = window.prompt('Baseline condition:', site.baseline_condition);
+    if (baseline === null) return;
+    const latStr = window.prompt('Latitude:', String(site.latitude));
+    if (latStr === null) return;
+    const lngStr = window.prompt('Longitude:', String(site.longitude));
+    if (lngStr === null) return;
+    (async () => {
+      try {
+        await api.updateSite(site.id, {
+          name,
+          community,
+          baseline_condition: baseline,
+          latitude: parseFloat(latStr),
+          longitude: parseFloat(lngStr),
+        });
+        await loadData();
+      } catch (err: any) {
+        alert(`Update failed: ${err.message || 'Unknown error'}`);
+      }
+    })();
+  };
+
+  const handleEditVisit = (visit: SiteVisit) => {
+    const purpose = window.prompt('Purpose:', visit.purpose);
+    if (purpose === null) return;
+    const activities = window.prompt('Activities observed:', visit.activities_observed || '');
+    if (activities === null) return;
+    const quality = window.prompt('Quality & HSE observations:', visit.quality_observations || '');
+    if (quality === null) return;
+    const recommendations = window.prompt('Recommendations:', visit.recommendations || '');
+    if (recommendations === null) return;
+    const progressStr = window.prompt('Progress %:', String(visit.progress_percentage ?? 0));
+    if (progressStr === null) return;
+    (async () => {
+      try {
+        await api.updateSiteVisit(visit.id, {
+          purpose,
+          activities_observed: activities,
+          quality_observations: quality,
+          recommendations,
+          progress_percentage: parseFloat(progressStr),
+        });
+        await loadData();
+      } catch (err: any) {
+        alert(`Update failed: ${err.message || 'Unknown error'}`);
+      }
+    })();
+  };
+
+  const handleDeleteVisit = async (visit: SiteVisit) => {
+    try {
+      await api.deleteSiteVisit(visit.id);
+      await loadData();
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Intervention Handlers
+  const handleUpdateIntervention = async (id: string, data: Partial<Intervention>) => {
+    const updated = await api.updateIntervention(id, data);
+    setInterventions(prev => prev.map(i => (i.id === id ? updated : i)));
+    await loadData();
+  };
+
+  // Action Handlers
+  const handleCreateAction = async (data: Partial<ActionItem>) => {
+    const newAction = await api.createAction(data);
+    setActions(prev => [newAction, ...prev]);
+  };
+
+  const handleUpdateAction = async (id: string, data: Partial<ActionItem>) => {
+    const updated = await api.updateAction(id, data);
+    setActions(prev => prev.map(a => (a.id === id ? updated : a)));
+  };
+
+  // Notification Handlers
+  const handleMarkNotificationAsRead = async (id: string) => {
+    await api.markNotificationRead(id);
+    setNotifications(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
+  };
+
+  const unreadNotificationsCount = notifications.filter(n => !n.read).length;
+
+  // Pending verification count — hazards still in the verification pipeline.
+  const pendingVerificationsCount = hazards.filter((h: any) => {
+    if (h.status === 'Intervention Approved') return false;
+    if (h.recommended_intervention || h.intervention) return false;
+    return (
+      h.status === 'Submitted' ||
+      h.status === 'Pending Verification' ||
+      h.status === 'Under Review' ||
+      !h.verified_by
+    );
+  }).length;
+
+  // View Title Resolver
+  const getViewTitle = () => {
+    switch (currentView) {
+      case 'dashboard': return 'EDEFA Executive Operations Dashboard';
+      case 'hazards':
+      case 'interventions': return 'Hazards & Interventions';
+      case 'verification': return 'Hazard Verification & Triage Workspace';
+      case 'projects': return 'Edo State Projects & Interventions Register';
+      case 'field-ops':
+      case 'sites':
+      case 'visits':
+      case 'field_visits':
+      case 'monitoring': return 'Field Operations — Sites, Inspections & Monitoring';
+      case 'evidence': return 'Tamper-Evident Evidence & Multimedia Repository';
+      case 'actions': return 'Corrective Actions & Enforcement Directives';
+      case 'map': return 'Edo State GIS & Spatial Intelligence Map';
+      case 'reports': return 'Edo State Hazard, Intervention & Planning Reports';
+      case 'analytics': return 'Decision Support & AI Copilot';
+      case 'audit': return 'Audit Logs & Governance Compliance';
+      case 'cms': return 'Content Management System';
+      default: return branding?.app_name || 'EDEFA-PHMIPS';
+    }
+  };
+
+  // ============================================================
+  // PUBLIC ROUTES — no login required, checked before auth gate
+  // ============================================================
+  if (publicRoute.startsWith('/public/report')) {
+    return (
+      <PublicReportPage
+        currentUser={currentUser}
+        onSignOut={handlePublicSignOut}
+        onBack={() => {
+          window.history.pushState({}, '', '/');
+          setPublicRoute('/');
+        }}
+      />
+    );
+  }
+
+  if (publicRoute.startsWith('/public/track')) {
+    const rawCode = publicRoute.replace('/public/track', '').replace(/^\//, '');
+    const code = rawCode ? decodeURIComponent(rawCode) : '';
+    return (
+      <PublicTrackPage
+        initialCode={code}
+        currentUser={currentUser}
+        onSignOut={handlePublicSignOut}
+        onBack={() => {
+          window.history.pushState({}, '', '/');
+          setPublicRoute('/');
+        }}
+      />
+    );
+  }
+
+  // ============================================================
+  // AUTH GATE
+  // ============================================================
+  if (!authenticated) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-3">
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="font-mono text-sm tracking-wider uppercase text-emerald-400">
+          Loading EF-PHMIPS Central Database...
+        </div>
+        <p className="text-xs text-slate-400">
+          Ecological Fund Project, Hazard, Monitoring, Intervention & Planning Management System
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 antialiased selection:bg-emerald-200">
+      {/* Top Header */}
+      <Header
+        currentUser={currentUser}
+        currentRole={currentRole}
+        onSwitchRole={async (roleId) => { const r = await api.switchRole(roleId); setCurrentUser(r.user); setCurrentRole(r.user.role as UserRole); }}
+        onRoleChange={setCurrentRole}
+        unreadNotificationsCount={unreadNotificationsCount}
+        onToggleNotifications={() => setIsNotificationOpen(prev => !prev)}
+        onNewReportClick={() => setIsReportModalOpen(true)}
+        currentViewTitle={getViewTitle()}
+        onLogout={async () => { await api.logout(); setAuthenticated(false); setCurrentUser(null); }}
+        onDatabaseCleared={loadData}
+        branding={branding}
+      />
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* Navigation Sidebar — filtered by currentRole */}
+        <Sidebar
+          currentView={currentView}
+          onViewChange={view => {
+            setCurrentView(view);
+            setIsMobileSidebarOpen(false);
+          }}
+          pendingVerificationsCount={pendingVerificationsCount}
+          activeProjectsCount={projects.length}
+          hazardsCount={hazards.length}
+          isMobileOpen={isMobileSidebarOpen}
+          setIsMobileOpen={setIsMobileSidebarOpen}
+          currentRole={currentUser?.role}
+        />
+
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6 pb-16">
+          <div className="max-w-7xl mx-auto">
+            {/* View Switcher */}
+            {currentView === 'dashboard' && stats && (
+              <ExecutiveDashboard
+                stats={stats}
+                onNavigate={(module) => {
+                  const alias: Record<string, string> = {
+                    field_visits: 'visits',
+                    planning: 'interventions',
+                  };
+                  setCurrentView(alias[module] || module);
+                }}
+                onQuickReport={() => setIsReportModalOpen(true)}
+              />
+            )}
+
+            {(currentView === 'hazards' || currentView === 'interventions' || currentView === 'verification') && (
+              <HazardReportsTabs
+                key={`${currentView}-${verificationHazardId ?? ''}`}
+                initialTab={
+                  currentView === 'interventions' ? 'interventions' :
+                  currentView === 'verification' ? 'verification' :
+                  'hazards'
+                }
+                initialHazardId={verificationHazardId}
+                hazards={hazards}
+                statesAndLgas={referenceData?.states_and_lgas || {}}
+                categories={referenceData?.hazard_categories || []}
+                onSelectHazard={h => setSelectedHazard(h)}
+                onNewReportClick={() => setIsReportModalOpen(true)}
+                onVerifyHazard={h => {
+                  setSelectedHazard(h);
+                  setVerificationHazardId(h.id);
+                  setCurrentView('verification');
+                }}
+                interventions={interventions}
+                projects={projects}
+                onUpdateIntervention={handleUpdateIntervention}
+                currentUser={currentUser}
+                onRefresh={loadData}
+                referenceData={referenceData}
+                onVerify={handleVerifyHazard}
+                onAssess={handleAssessHazard}
+                onRecommendIntervention={handleRecommendIntervention}
+                onEditIntervention={(iv) => setEditingIntervention(iv)}
+                onDeleteIntervention={handleDeleteIntervention}
+              />
+            )}
+
+            {currentView === 'projects' && (
+              <ProjectList
+                projects={projects}
+                statesAndLgas={referenceData?.states_and_lgas || {}}
+                categories={referenceData?.hazard_categories || []}
+                onSelectProject={p => setSelectedProject(p)}
+                onNewProjectClick={() => setIsProjectModalOpen(true)}
+                currentUser={currentUser}
+                onRefresh={loadData}
+                onEditProject={(p) => setEditingProject(p)}
+                onDeleteProject={handleDeleteProject}
+              />
+            )}
+
+            {(currentView === 'field-ops' ||
+              currentView === 'sites' ||
+              currentView === 'visits' ||
+              currentView === 'field_visits' ||
+              currentView === 'monitoring') && (
+              <FieldOperations
+                initialTab={
+                  currentView === 'visits' || currentView === 'field_visits' ? 'inspections' :
+                  currentView === 'monitoring' ? 'monitoring' :
+                  'sites'
+                }
+                sites={sites}
+                projects={projects}
+                onCreateSite={handleCreateSite}
+                onNavigateToMap={navigateToMapCoordinate}
+                onEditSite={handleEditSite}
+                onDeleteSite={handleDeleteSite}
+                onEditVisit={handleEditVisit}
+                onDeleteVisit={handleDeleteVisit}
+                currentUser={currentUser}
+                visits={visits}
+                onOpenLogModal={() => {
+                  setVisitDefaultProject(null);
+                  setIsVisitModalOpen(true);
+                }}
+                evidenceList={evidenceList}
+              />
+            )}
+
+            {currentView === 'evidence' && (
+              <EvidenceRepository
+                evidenceList={evidenceList}
+                projects={projects}
+                hazards={hazards}
+                onUploadClick={() => setIsVisitModalOpen(true)}
+              />
+            )}
+
+            {currentView === 'actions' && (
+              <ActionTracking
+                currentUser={currentUser}
+                actions={actions}
+                onCreateAction={handleCreateAction}
+                onUpdateAction={handleUpdateAction}
+              />
+            )}
+
+            {currentView === 'map' && (
+              <GisMapModule
+                hazards={hazards}
+                projects={projects}
+                onSelectHazard={h => setSelectedHazard(h)}
+                onSelectProject={p => setSelectedProject(p)}
+                initialCenter={mapCenter}
+              />
+            )}
+
+            {currentView === 'reports' && (
+              <ComprehensiveReportEngine
+                referenceData={referenceData}
+              />
+            )}
+
+            {currentView === 'analytics' && (
+              <AnalyticsModule />
+            )}
+
+            {currentView === 'audit' && (
+              <AuditLogsModule logs={auditLogs} />
+            )}
+
+            {currentView === 'cms' && currentUser?.role === 'SUPER_ADMIN' && (
+              <CmsModule />
+            )}
+          </div>
+        </main>
+      </div>
+
+      {/* Global Modals & Drawers */}
+      <NotificationDrawer
+        isOpen={isNotificationOpen}
+        onClose={() => setIsNotificationOpen(false)}
+        notifications={notifications}
+        onMarkRead={handleMarkNotificationAsRead}
+        onNavigate={module => {
+          setIsNotificationOpen(false);
+          setCurrentView(module);
+        }}
+      />
+
+      <HazardReportModal
+        isOpen={isReportModalOpen || Boolean(editingHazard)}
+        onClose={() => { setIsReportModalOpen(false); setEditingHazard(null); }}
+        onSubmit={editingHazard
+          ? (data: any) => handleEditHazard(editingHazard.id, data)
+          : handleCreateHazard}
+        statesAndLgas={referenceData?.states_and_lgas || {}}
+        categories={referenceData?.hazard_categories || []}
+        editHazard={editingHazard}
+        referenceData={referenceData}
+      />
+
+      <HazardDetailModal
+        hazard={selectedHazard}
+        onClose={() => setSelectedHazard(null)}
+        onVerifyClick={(h) => {
+          setSelectedHazard(null);
+          setVerificationHazardId(h.id);
+          setCurrentView('verification');
+        }}
+        onAssessClick={(h) => {
+          setSelectedHazard(null);
+          setVerificationHazardId(h.id);
+          setCurrentView('verification');
+        }}
+        onInterventionClick={(h) => {
+          setSelectedHazard(null);
+          setCurrentView('interventions');
+        }}
+        onNavigateToMap={navigateToMapCoordinate}
+        onEdit={canEditFn(currentUser?.role) ? (h) => { setEditingHazard(h); setSelectedHazard(null); } : undefined}
+        onPlanIntervention={(h) => { setPlanInterventionFor(h); setSelectedHazard(null); }}
+        onDelete={canDeleteFn(currentUser?.role) ? handleDeleteHazard : undefined}
+        currentRole={currentUser?.role}
+      />
+
+      {/* Project create modal */}
+      <ProjectModal
+        isOpen={isProjectModalOpen}
+        onClose={() => setIsProjectModalOpen(false)}
+        onSubmit={handleCreateProject}
+        statesAndLgas={referenceData?.states_and_lgas || {}}
+        categories={referenceData?.hazard_categories || []}
+        referenceData={referenceData}
+      />
+
+      {/* Project edit modal */}
+      <ProjectModal
+        isOpen={Boolean(editingProject)}
+        onClose={() => setEditingProject(null)}
+        onSubmit={async (data) => {
+          if (!editingProject) return;
+          await handleUpdateProject(editingProject.id, data);
+        }}
+        statesAndLgas={referenceData?.states_and_lgas || {}}
+        categories={referenceData?.hazard_categories || []}
+        existingProject={editingProject}
+        referenceData={referenceData}
+      />
+
+      <ProjectDetailModal
+        project={selectedProject}
+        onClose={() => setSelectedProject(null)}
+        onLogVisitClick={p => {
+          setVisitDefaultProject(p);
+          setIsVisitModalOpen(true);
+        }}
+        onNavigateToMap={navigateToMapCoordinate}
+        onRefresh={loadData}
+        onApproveProject={handleApproveProject}
+        currentUserRole={currentUser?.role}
+        onRejectProject={handleRejectProject}
+        onCreateSite={handleCreateSite}
+        onEditProject={(p) => { setSelectedProject(null); setEditingProject(p); }}
+        onDeleteProject={async (p) => { setSelectedProject(null); await handleDeleteProject(p); }}
+      />
+
+      <FieldVisitForm
+        isOpen={isVisitModalOpen}
+        onClose={() => setIsVisitModalOpen(false)}
+        onSubmit={handleLogVisit}
+        projects={projects}
+        sites={sites}
+        defaultProject={visitDefaultProject}
+        referenceData={referenceData}
+      />
+
+      {/* Intervention create modal (from hazard → "Plan Engineering Intervention") */}
+      <InterventionModal
+        isOpen={Boolean(planInterventionFor)}
+        onClose={() => setPlanInterventionFor(null)}
+        hazard={planInterventionFor}
+        currentUser={currentUser}
+        onSuccess={async () => { await loadData(); }}
+        referenceData={referenceData}
+      />
+
+      {/* Intervention edit modal */}
+      <InterventionModal
+        isOpen={Boolean(editingIntervention)}
+        onClose={() => setEditingIntervention(null)}
+        hazard={hazards.find(h => h.id === editingIntervention?.hazard_id) || null}
+        currentUser={currentUser}
+        existingIntervention={editingIntervention}
+        onSuccess={async () => {
+          setEditingIntervention(null);
+          await loadData();
+        }}
+        referenceData={referenceData}
+      />
+    </div>
+  );
+}

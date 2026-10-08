@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ef_phmips
+      POSTGRES_USER: ef_phmips
+      POSTGRES_PASSWORD: change-me
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ef_phmips -d ef_phmips"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://ef_phmips:change-me@db:5432/ef_phmips
+      PORT: 5000
+    depends_on:
+      db:
+        condition: service_healthy
+    ports: ["5000:5000"]
+volumes:
+  postgres_data:

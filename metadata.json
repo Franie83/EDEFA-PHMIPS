@@ -1,0 +1,12 @@
+{
+  "name": "Ecological Fund PHMIPS",
+  "description": "Edo State Ecological Fund Agency (EDEFA) - Ecological Project, Hazard, Monitoring, Intervention & Planning Management System for Edo State, Nigeria.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
